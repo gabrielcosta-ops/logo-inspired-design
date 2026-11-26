@@ -20,6 +20,13 @@ const levels: Level[] = [
 ];
 
 describe("pontuação", () => {
+  it("atribui o gol ao artilheiro e a assistência ao garçom da mesma partida", () => {
+    const stats = computeStats([player("artilheiro", "Bolinha"), player("garcom", "Zé Canela")], [match("m1")],
+      [{ match_id: "m1", player_id: "artilheiro", team: "A" }, { match_id: "m1", player_id: "garcom", team: "A" }],
+      [ev({ player_id: "artilheiro", assist_player_id: "garcom" })], { goal_points: 3, assist_points: 2 });
+    expect(stats.find((s) => s.player.id === "artilheiro")).toMatchObject({ goals: 1, assists: 0, games: 1 });
+    expect(stats.find((s) => s.player.id === "garcom")).toMatchObject({ goals: 0, assists: 1, games: 1 });
+  });
   it("gol vale 3 e assistência vale 2 por padrão", () => {
     const players = [player("p1", "Bolinha"), player("p2", "Zé Canela")];
     const events = [ev({ player_id: "p1", assist_player_id: "p2" }), ev({ player_id: "p1" })];

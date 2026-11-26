@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Crest, Wordmark } from "@/components/futraiz/brand";
 import { Button } from "@/components/ui/button";
@@ -29,6 +29,35 @@ function AuthPage() {
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [sent, setSent] = useState(false);
+  const [linkSent, setLinkSent] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    const check = async () => {
+      const { data } = await supabase.auth.getUser();
+      if (active && data.user) await navigate({ to: "/admin", replace: true });
+    };
+    void check();
+    const { data } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "SIGNED_IN") void check();
+    });
+    return () => { active = false; data.subscription.unsubscribe(); };
+  }, [navigate]);
+
+  async function sendLink() {
+    if (!email.trim()) { toast.error("Informe seu e-mail"); return; }
+    setBusy(true);
+    try {
+      const { error } = await supabase.auth.signInWithOtp({
+        email: email.trim(),
+        options: { emailRedirectTo: `${window.location.origin}/auth` },
+      });
+      if (error) throw error;
+      setLinkSent(true);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Não foi possível enviar o link");
+    } finally { setBusy(false); }
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -42,7 +71,7 @@ function AuthPage() {
         const { data, error } = await supabase.auth.signUp({
           email,
           password,
-          options: { emailRedirectTo: `${window.location.origin}/admin` },
+          options: { emailRedirectTo: window.location.origin },
         });
         if (error) throw error;
         if (data.session) await navigate({ to: "/admin", replace: true });
@@ -64,9 +93,9 @@ function AuthPage() {
           <Wordmark className="text-3xl" />
           <span className="font-heading text-xs text-gold">Painel do admin</span>
         </Link>
-        {sent ? (
+        {sent || linkSent ? (
           <p className="rounded-lg bg-muted p-4 text-center text-sm">
-            Mandamos um link de confirmação pro <b>{email}</b>. Abre o e-mail, confirma e depois entra aqui.
+            {linkSent ? <>Mandamos um link de acesso pro <b>{email}</b>. Abra o e-mail e toque no link para entrar.</> : <>Mandamos um link de confirmação pro <b>{email}</b>. Abre o e-mail, confirma e depois entra aqui.</>}
           </p>
         ) : (
           <form onSubmit={submit} className="space-y-4">
@@ -89,20 +118,23 @@ function AuthPage() {
             <Button type="submit" variant="gold" size="lg" className="w-full" disabled={busy}>
               {mode === "in" ? "Entrar" : "Criar conta"}
             </Button>
+            <Button type="button" variant="outline" className="w-full" disabled={busy} onClick={sendLink}>
+              Entrar por link no e-mail
+            </Button>
             <p className="text-center text-xs text-muted-foreground">
               {mode === "in" ? (
                 <>
                   Primeira vez?{" "}
-                  <button type="button" className="text-gold underline" onClick={() => setMode("up")}>
+                   <Button variant="link" type="button" className="h-auto p-0 text-xs text-gold underline" onClick={() => setMode("up")}>
                     Criar conta de admin
-                  </button>
+                   </Button>
                 </>
               ) : (
                 <>
                   A primeira conta criada vira o admin.{" "}
-                  <button type="button" className="text-gold underline" onClick={() => setMode("in")}>
+                   <Button variant="link" type="button" className="h-auto p-0 text-xs text-gold underline" onClick={() => setMode("in")}>
                     Já tenho conta
-                  </button>
+                   </Button>
                 </>
               )}
             </p>

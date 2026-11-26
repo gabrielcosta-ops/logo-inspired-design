@@ -135,6 +135,7 @@ function LiveControl({ d, match }: { d: Derived; match: Match }) {
   const run = useAdminRun();
   const [flow, setFlow] = useState<Flow | null>(null);
   const [showAll, setShowAll] = useState(false);
+  const [saving, setSaving] = useState(false);
   const events = d.liveEvents;
   const lineup = useMemo(() => d.matchPlayers.filter((mp) => mp.match_id === match.id), [d.matchPlayers, match.id]);
   const teamOf = useMemo(() => new Map(lineup.map((mp) => [mp.player_id, mp.team as Team])), [lineup]);
@@ -144,14 +145,23 @@ function LiveControl({ d, match }: { d: Derived; match: Match }) {
 
   async function ensureInLineup(playerId: string, team: Team) {
     if (teamOf.has(playerId)) return;
-    await supabase.from("match_players").insert({ match_id: match.id, player_id: playerId, team });
+    const { error } = await supabase.from("match_players").upsert({ match_id: match.id, player_id: playerId, team }, { onConflict: "match_id,player_id" });
+    if (error) throw new Error(error.message);
   }
 
   async function addEvent(e: Pick<MatchEvent, "type" | "team" | "player_id" | "assist_player_id">) {
-    setFlow(null);
-    setShowAll(false);
-    if (e.player_id && e.type !== "own_goal") await ensureInLineup(e.player_id, e.team as Team);
-    await run(() => supabase.from("match_events").insert({ ...e, match_id: match.id, minute: minute() }));
+    if (saving) return;
+    setSaving(true);
+    try {
+      if (e.player_id && e.type !== "own_goal") await ensureInLineup(e.player_id, e.team as Team);
+      if (e.assist_player_id) await ensureInLineup(e.assist_player_id, e.team as Team);
+      const saved = await run(() => supabase.from("match_events").insert({ ...e, match_id: match.id, minute: minute() }), e.type === "goal" ? "Gol registrado! ⚽" : "Lance registrado");
+      if (saved) { setFlow(null); setShowAll(false); }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Não foi possível registrar o lance");
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function toggleClock() {
@@ -216,7 +226,7 @@ function LiveControl({ d, match }: { d: Derived; match: Match }) {
     if (showAll || base.length === 0) {
       const ids = new Set(base.map((p) => p.id));
       const scorer = flow.kind === "goal" && flow.step === "assist" ? flow.scorerId : null;
-      return [...base, ...active.filter((p) => !ids.has(p.id) && p.id !== scorer)];
+      return [...base, ...active.filter((p) => !ids.has(p.id) && p.id !== scorer && (flow.kind !== "goal" || !teamOf.has(p.id) || teamOf.get(p.id) === flow.team))];
     }
     return base;
   };
@@ -226,7 +236,7 @@ function LiveControl({ d, match }: { d: Derived; match: Match }) {
     : flow.kind === "goal"
       ? flow.step === "scorer"
         ? `Quem fez o gol? (${flow.team === "A" ? match.team_a_name : match.team_b_name})`
-        : "Quem deu a assistência?"
+        : "Quem foi o garçom? (assistência)"
       : flow.kind === "own_goal"
         ? "Quem fez gol contra?"
         : flow.kind === "yellow"
@@ -249,25 +259,25 @@ function LiveControl({ d, match }: { d: Derived; match: Match }) {
       </div>
 
       <div className="grid grid-cols-3 gap-2">
-        <Button variant="board" size="xl" className="text-sm" onClick={() => setFlow({ kind: "own_goal" })}>🙈 Gol contra</Button>
-        <Button variant="board" size="xl" className="text-sm" onClick={() => setFlow({ kind: "yellow" })}>
+        <Button variant="board" size="xl" className="px-2 text-xs sm:text-sm" onClick={() => setFlow({ kind: "own_goal" })}>🙈 Gol contra</Button>
+        <Button variant="board" size="xl" className="px-2 text-xs sm:text-sm" onClick={() => setFlow({ kind: "yellow" })}>
           <span className="h-5 w-4 rounded-sm bg-card-yellow" /> Amarelo
         </Button>
-        <Button variant="board" size="xl" className="text-sm" onClick={() => setFlow({ kind: "red" })}>
+        <Button variant="board" size="xl" className="px-2 text-xs sm:text-sm" onClick={() => setFlow({ kind: "red" })}>
           <span className="h-5 w-4 rounded-sm bg-card-red" /> Vermelho
         </Button>
       </div>
 
       <div className="grid grid-cols-3 gap-2">
-        <Button variant="outline" size="xl" onClick={undo} disabled={events.length === 0} className="text-base">
+        <Button variant="outline" size="xl" onClick={undo} disabled={events.length === 0 || saving} className="px-2 text-xs sm:text-base">
           <Undo2 /> Desfazer
         </Button>
-        <Button variant="outline" size="xl" onClick={toggleClock} className="text-base">
+        <Button variant="outline" size="xl" onClick={toggleClock} className="px-2 text-xs sm:text-base">
           {running ? <Pause /> : <Play />} {running ? "Pausar" : "Rodar"}
         </Button>
         <AlertDialog>
           <AlertDialogTrigger asChild>
-            <Button variant="destructive" size="xl" className="text-base"><Flag /> Encerrar</Button>
+            <Button variant="destructive" size="xl" className="px-2 text-xs sm:text-base"><Flag /> Encerrar</Button>
           </AlertDialogTrigger>
           <AlertDialogContent>
             <AlertDialogHeader>
@@ -289,24 +299,32 @@ function LiveControl({ d, match }: { d: Derived; match: Match }) {
         <EventFeed events={events} players={d.playerById} match={match} />
       </div>
 
-      <Drawer open={!!flow} onOpenChange={(o) => { if (!o) { setFlow(null); setShowAll(false); } }}>
+      <Drawer open={!!flow} onOpenChange={(o) => { if (!o && !saving) { setFlow(null); setShowAll(false); } }}>
         <DrawerContent className="max-h-[85dvh]">
           <DrawerHeader>
             <DrawerTitle className="font-heading text-lg text-gold">{title}</DrawerTitle>
           </DrawerHeader>
           <div className="overflow-y-auto px-4 pb-6">
+            {flow?.kind === "goal" && flow.step === "assist" && (
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <p className="text-sm text-muted-foreground">⚽ Gol de <b className="text-foreground">{d.playerById.get(flow.scorerId)?.nickname}</b></p>
+                <Button variant="ghost" size="sm" disabled={saving} onClick={() => { setFlow({ kind: "goal", team: flow.team, step: "scorer" }); setShowAll(false); }}>Voltar</Button>
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
               {flow?.kind === "goal" && flow.step === "assist" && (
-                <button type="button" onClick={() => onPick(null)} className="col-span-2 rounded-xl border-2 border-dashed border-border p-4 font-heading text-muted-foreground sm:col-span-3">
-                  Sem assistência
-                </button>
+                <Button type="button" variant="outline" disabled={saving} onClick={() => onPick(null)} className="col-span-2 h-auto rounded-lg border-2 border-dashed p-4 font-heading text-muted-foreground sm:col-span-3">
+                  {saving ? "Registrando…" : "Sem assistência"}
+                </Button>
               )}
               {pickerPlayers().map((p) => (
-                <button
+                <Button
                   key={p.id}
                   type="button"
+                  variant="outline"
+                  disabled={saving}
                   onClick={() => onPick(p.id)}
-                  className="flex items-center gap-2 rounded-xl border-2 border-border bg-muted/50 p-3 text-left active:border-gold active:bg-gold/10"
+                  className="h-auto justify-start gap-2 rounded-lg border-2 border-border bg-muted/50 p-3 text-left active:border-gold active:bg-gold/10"
                 >
                   <PlayerAvatar player={p} size="md" />
                   <span className="min-w-0 flex-1">
@@ -317,11 +335,11 @@ function LiveControl({ d, match }: { d: Derived; match: Match }) {
                       </span>
                     )}
                   </span>
-                </button>
+                </Button>
               ))}
             </div>
             {!showAll && (
-              <Button variant="ghost" className="mt-3 w-full" onClick={() => setShowAll(true)}>
+              <Button variant="ghost" disabled={saving} className="mt-3 w-full" onClick={() => setShowAll(true)}>
                 Mostrar todos os jogadores
               </Button>
             )}

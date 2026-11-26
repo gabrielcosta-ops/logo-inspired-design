@@ -7,6 +7,7 @@ import { AdminLive } from "@/components/futraiz/admin/admin-live";
 import { AdminPlayers } from "@/components/futraiz/admin/admin-players";
 import { AdminSeason } from "@/components/futraiz/admin/admin-season";
 import { SiteHeader } from "@/components/futraiz/brand";
+import { MatchHistory } from "@/components/futraiz/live";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -109,13 +110,18 @@ function AdminPage() {
       {header}
       <main className="mx-auto max-w-3xl px-3 pt-4">
         <Tabs defaultValue="jogo">
-          <TabsList className="grid h-auto w-full grid-cols-4 bg-muted p-1">
+          <TabsList className="grid h-auto w-full grid-cols-5 bg-muted p-1">
             <TabsTrigger value="jogo" className={tabClass}>Jogo</TabsTrigger>
+            <TabsTrigger value="partidas" className={tabClass}>Partidas</TabsTrigger>
             <TabsTrigger value="jogadores" className={tabClass}>Jogadores</TabsTrigger>
             <TabsTrigger value="niveis" className={tabClass}>Níveis</TabsTrigger>
             <TabsTrigger value="temporada" className={tabClass}>Temporada</TabsTrigger>
           </TabsList>
           <TabsContent value="jogo" className="mt-4"><AdminLive d={d} /></TabsContent>
+          <TabsContent value="partidas" className="mt-4">
+            <h2 className="mb-3 font-display text-2xl text-gold">Partidas</h2>
+            <MatchHistory matches={d.matches} events={d.events} players={d.playerById} />
+          </TabsContent>
           <TabsContent value="jogadores" className="mt-4"><AdminPlayers d={d} /></TabsContent>
           <TabsContent value="niveis" className="mt-4"><AdminLevels d={d} /></TabsContent>
           <TabsContent value="temporada" className="mt-4"><AdminSeason d={d} /></TabsContent>
